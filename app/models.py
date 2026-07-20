@@ -18,6 +18,9 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(256), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     target_weight = db.Column(db.Float, default=65.0)
+    current_streak = db.Column(db.Integer, nullable=False, default=0)
+    longest_streak = db.Column(db.Integer, nullable=False, default=0)
+    last_streak_date = db.Column(db.Date, nullable=True)
 
     habits = db.relationship("Habit", backref="user", lazy="dynamic", cascade="all, delete-orphan")
 

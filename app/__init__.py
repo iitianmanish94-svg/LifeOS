@@ -28,8 +28,9 @@ def create_app(config_class=Config):
     app.register_blueprint(trackers_bp)
 
     with app.app_context():
-        from app.services import seed_defaults
+        from app.services import migrate_streak_data, seed_defaults
         db.create_all()
+        migrate_streak_data()
         seed_defaults()
 
     return app

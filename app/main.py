@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import timedelta
 import csv
 from io import StringIO
 
@@ -7,7 +7,9 @@ from flask_login import current_user, login_required
 
 from app import db
 from app.models import Habit, HabitLog, StudyLog, WeightLog
-from app.services import current_streak, daily_summary, heatmap
+from app.services import (current_streak, daily_summary, heatmap,
+                          rebuild_streak_state, record_first_completion_of_day,
+                          today_in_india)
 
 bp = Blueprint("main", __name__)
 
@@ -28,7 +30,7 @@ def health():
 @login_required
 def dashboard():
     summary = daily_summary(current_user)
-    today = date.today()
+    today = today_in_india()
     study_hours = sum(log.hours for log in StudyLog.query.filter_by(user_id=current_user.id, logged_on=today))
     latest_weight = WeightLog.query.filter_by(user_id=current_user.id).order_by(WeightLog.logged_on.desc()).first()
     weekly = [daily_summary(current_user, today - timedelta(days=i))["percent"] for i in range(6, -1, -1)]
@@ -56,12 +58,30 @@ def habits():
 @login_required
 def toggle_habit(habit_id):
     habit = Habit.query.filter_by(id=habit_id, user_id=current_user.id).first_or_404()
-    log = HabitLog.query.filter_by(habit_id=habit.id, completed_on=date.today()).first()
+    completed_on = today_in_india()
+    log = HabitLog.query.filter_by(habit_id=habit.id, completed_on=completed_on).first()
     if log:
         db.session.delete(log)
+        db.session.flush()
+        still_completed_that_day = (
+            db.session.query(HabitLog.id)
+            .join(Habit)
+            .filter(Habit.user_id == current_user.id, HabitLog.completed_on == completed_on)
+            .first()
+        )
+        if not still_completed_that_day:
+            rebuild_streak_state(current_user)
         completed = False
     else:
-        db.session.add(HabitLog(habit_id=habit.id, completed_on=date.today()))
+        first_completion_that_day = not (
+            db.session.query(HabitLog.id)
+            .join(Habit)
+            .filter(Habit.user_id == current_user.id, HabitLog.completed_on == completed_on)
+            .first()
+        )
+        db.session.add(HabitLog(habit_id=habit.id, completed_on=completed_on))
+        if first_completion_that_day:
+            record_first_completion_of_day(current_user, completed_on)
         completed = True
     db.session.commit()
     summary = daily_summary(current_user)
@@ -77,9 +97,10 @@ def calendar():
 @bp.route("/stats")
 @login_required
 def stats():
-    labels = [(date.today() - timedelta(days=i)).strftime("%a") for i in range(6, -1, -1)]
-    values = [daily_summary(current_user, date.today() - timedelta(days=i))["percent"] for i in range(6, -1, -1)]
-    study = [sum(x.hours for x in StudyLog.query.filter_by(user_id=current_user.id, logged_on=date.today() - timedelta(days=i))) for i in range(6, -1, -1)]
+    today = today_in_india()
+    labels = [(today - timedelta(days=i)).strftime("%a") for i in range(6, -1, -1)]
+    values = [daily_summary(current_user, today - timedelta(days=i))["percent"] for i in range(6, -1, -1)]
+    study = [sum(x.hours for x in StudyLog.query.filter_by(user_id=current_user.id, logged_on=today - timedelta(days=i))) for i in range(6, -1, -1)]
     return render_template("stats.html", labels=labels, values=values, study=study, heatmap=heatmap(current_user))
 
 
